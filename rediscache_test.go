@@ -1,4 +1,4 @@
-package rediscache
+package rediscache_test
 
 import (
 	"context"
@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
-	miniredis "github.com/alicebob/miniredis/v2"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/chi07/rediscache"
 )
 
 // newTestCache tạo Cache + miniredis (in-memory)
-func newTestCache(t *testing.T) (*Cache, *miniredis.Miniredis) {
+func newTestCache(t *testing.T) (*rediscache.Cache, *miniredis.Miniredis) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -19,7 +21,7 @@ func newTestCache(t *testing.T) (*Cache, *miniredis.Miniredis) {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: mr.Addr(),
 	})
-	c := New(rdb, Options{
+	c := rediscache.New(rdb, rediscache.Options{
 		TTL:             2 * time.Minute,
 		KeyPrefix:       "test",
 		ReadTimeout:     300 * time.Millisecond,
@@ -44,7 +46,7 @@ func TestKeyAndNormalize(t *testing.T) {
 		"Đ ấ y  ":           "đ ấ y",
 	}
 	for in, want := range cases {
-		if got := Normalize(in); got != want {
+		if got := rediscache.Normalize(in); got != want {
 			t.Errorf("Normalize(%q) = %q; want %q", in, got, want)
 		}
 	}
@@ -141,7 +143,7 @@ func TestAtomicReplaceHashJSON_AndHGetJSON(t *testing.T) {
 	}
 
 	// đọc lại từng phần tử bằng generic HGetJSON
-	g9, ok, err := HGetJSON[Group](ctx, c, key, "9")
+	g9, ok, err := rediscache.HGetJSON[Group](ctx, c, key, "9")
 	if err != nil || !ok {
 		t.Fatalf("HGetJSON 9 error=%v ok=%v", err, ok)
 	}
@@ -150,7 +152,7 @@ func TestAtomicReplaceHashJSON_AndHGetJSON(t *testing.T) {
 	}
 
 	// trường không tồn tại
-	_, ok, err = HGetJSON[Group](ctx, c, key, "404")
+	_, ok, err = rediscache.HGetJSON[Group](ctx, c, key, "404")
 	if err != nil {
 		t.Fatalf("HGetJSON 404 err should be nil; got %v", err)
 	}
@@ -173,7 +175,7 @@ func TestSetSnapshot_AndTryGetSnapshot(t *testing.T) {
 		t.Fatalf("SetSnapshot error: %v", err)
 	}
 
-	got, ok, err := TryGetSnapshot[Snapshot](ctx, c, key)
+	got, ok, err := rediscache.TryGetSnapshot[Snapshot](ctx, c, key)
 	if err != nil || !ok {
 		t.Fatalf("TryGetSnapshot error=%v ok=%v", err, ok)
 	}
@@ -182,7 +184,7 @@ func TestSetSnapshot_AndTryGetSnapshot(t *testing.T) {
 	}
 
 	// key không tồn tại
-	_, ok, err = TryGetSnapshot[Snapshot](ctx, c, c.Key("missing"))
+	_, ok, err = rediscache.TryGetSnapshot[Snapshot](ctx, c, c.Key("missing"))
 	if err != nil {
 		t.Fatalf("TryGetSnapshot missing err should be nil; got %v", err)
 	}
@@ -252,7 +254,7 @@ func TestTryGetSnapshot_UnmarshalError(t *testing.T) {
 	}
 
 	type Any struct{ X int } // kiểu bất kỳ
-	_, ok, err := TryGetSnapshot[Any](ctx, c, key)
+	_, ok, err := rediscache.TryGetSnapshot[Any](ctx, c, key)
 	if ok {
 		t.Fatalf("expected ok=false due to unmarshal error")
 	}
@@ -273,7 +275,7 @@ func TestHGetJSON_UnmarshalError(t *testing.T) {
 	}
 
 	type Y struct{ B string }
-	_, ok, err := HGetJSON[Y](ctx, c, key, "field")
+	_, ok, err := rediscache.HGetJSON[Y](ctx, c, key, "field")
 	if ok {
 		t.Fatalf("expected ok=false due to unmarshal error")
 	}
@@ -303,7 +305,7 @@ func TestTryGetSnapshot_RedisNilPath(t *testing.T) {
 	c, _ := newTestCache(t)
 
 	// key chưa tồn tại
-	_, ok, err := TryGetSnapshot[struct{ X int }](ctx, c, c.Key("no", "snap"))
+	_, ok, err := rediscache.TryGetSnapshot[struct{ X int }](ctx, c, c.Key("no", "snap"))
 	if err != nil {
 		t.Fatalf("TryGetSnapshot err should be nil on redis.Nil path; got %v", err)
 	}
@@ -319,7 +321,7 @@ func TestHGetJSON_RedisNilPath(t *testing.T) {
 	key := c.Key("hash", "jsonnil")
 	type T struct{ N int }
 
-	_, ok, err := HGetJSON[T](ctx, c, key, "notfound")
+	_, ok, err := rediscache.HGetJSON[T](ctx, c, key, "notfound")
 	if err != nil {
 		t.Fatalf("HGetJSON err should be nil on redis.Nil path; got %v", err)
 	}
