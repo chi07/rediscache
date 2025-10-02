@@ -4,17 +4,14 @@
 [![codecov](https://codecov.io/gh/chi07/rediscache/branch/main/graph/badge.svg)](https://codecov.io/gh/chi07/rediscache)
 [![CI](https://github.com/chi07/rediscache/actions/workflows/ci.yml/badge.svg)](https://github.com/chi07/rediscache/actions/workflows/ci.yml)
 
-**rediscache** is a **thread-safe circular buffer (ring buffer) cache** with a fixed capacity inspired by original [rediscache](https://github.com/hadv/rediscache) by HaDV.
-It stores `(key, value)` pairs up to a predefined limit. When the cache is full, the oldest entry is overwritten (evicted).  
-You can attach an `EvictCallback` to get notified whenever an item is evicted.
+Nhẹ, nhanh, và an toàn để dựng cache tầng Redis với:
+- **Atomic refresh** bằng `tmp → RENAME` (không lộ trạng thái dở dang)
+- **Snapshot** (String) & **Hash** (by-id, index)
+- Tiện **generic helpers**: `TryGetSnapshot[T]`, `HGetJSON[T]`
+- Timeout riêng cho **read/write/pipeline**
+- Key prefix tiện cho multi-tenant/microservice
 
-## Features
-
-- 🚀 **Thread-safe** (using `sync.RWMutex`)
-- ♻️ **Fixed-size circular buffer** (bounded memory usage)
-- 🔔 **Evict callback** for custom eviction handling
-- ⚡ **O(1) Push/Load/Delete**
-- ✨ Simple, idiomatic Go API with generics
+> Go 1.21+ · go-redis/v9
 
 ## Installation
 
@@ -23,77 +20,80 @@ go get github.com/chi07/rediscache
 ```
 Usage
 
-1. Basic Example
+1. Khởi tạo
 ```go
-package main
-
 import (
-    "fmt"
-    "github.com/chi07/rediscache"
+"github.com/redis/go-redis/v9"
+cache "github.com/chi07/rediscache"
+"time"
 )
 
-func main() {
-    // Create a cache with capacity=3, key=int, value=string
-    rc, err := rediscache.New[int, string](3)
-    if err != nil {
-        panic(err)
-    }
+rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
+c := cache.New(rdb, cache.Options{
+TTL:             15 * time.Minute,
+KeyPrefix:       "svc",
+ReadTimeout:     300 * time.Millisecond,
+WriteTimeout:    600 * time.Millisecond,
+PipelineTimeout: 1 * time.Second,
+})
+```
 
-    rc.Push(1, "one")
-    rc.Push(2, "two")
+2. Keys & Normalize
+```go
+k := c.Key("course", "by_id") // "svc:course:by_id"
+n := cache.Normalize("  Hello   World ") // "hello world"
+```
 
-    // Load a value
-    if v, ok := rc.Load(1); ok {
-        fmt.Println("Key 1 =", v) // "one"
-    }
+3. Atomic replace hash
 
-    fmt.Println("Size:", rc.Size())       // 2
-    fmt.Println("Capacity:", rc.Capacity()) // 3
+```go
+err := c.AtomicReplaceHash(ctx, c.Key("group", "name2id"), map[string]string{
+  "backend": "9",
+  "mobile":  "3",
+})
+```
+
+Atomic replace hash (giá trị JSON)
+```go
+type Group struct{ ID int; Name string }
+
+byID := map[string]any{
+  "9": Group{ID: 9, Name: "Backend"},
+  "3": Group{ID: 3, Name: "Mobile"},
+}
+_ = c.AtomicReplaceHashJSON(ctx, c.Key("group", "by_id"), byID)
+```
+
+Snapshot (String JSON)
+```go
+snap := struct {
+  Data []int `json:"data"`
+}{Data: []int{1,2,3}}
+
+_ = c.SetSnapshot(ctx, c.Key("course", "snapshot"), snap)
+
+// Đọc lại (generic)
+var got struct{ Data []int `json:"data"` }
+if v, ok, err := cache.TryGetSnapshot[struct{ Data []int `json:"data"` }](ctx, c, c.Key("course", "snapshot")); err == nil && ok {
+  got = v
 }
 ```
 
-2. With Eviction Callback
+HGET JSON (generic) & String
 ```go
-rc, _ := rediscache.NewWithEvictCallback[int, string](2, func(k int, v string) {
-    fmt.Printf("Evicted key=%d, value=%s\n", k, v)
-})
+// JSON
+type Course struct{ ID int; Name string }
+v, ok, err := cache.HGetJSON[Course](ctx, c, c.Key("course", "by_id"), "35")
 
-rc.Push(1, "one")
-rc.Push(2, "two")
-
-// Adding another element evicts "1"
-rc.Push(3, "three")
-// Output: Evicted key=1, value=one
+// String
+s, ok, err := c.HGetString(ctx, c.Key("course", "name2id"), "golang")
 ```
 
-### 3. API Overview
-
-- **`New[K, V](capacity int) (*rediscache[K, V], error)`**  
-  Creates a new cache with the given capacity.
-
-- **`NewWithEvictCallback[K, V](capacity int, cb EvictCallback[K, V])`**  
-  Creates a new cache with an eviction callback.
-
-- **`Push(key K, value V) (evicted bool)`**  
-  Inserts a key-value pair. Returns `true` if an eviction occurred.
-
-- **`Load(key K) (V, bool)`**  
-  Retrieves a value for the key.
-
-- **`Has(key K) bool`**  
-  Checks if a key exists in the cache.
-
-- **`Delete(key K) bool`**  
-  Removes a key. Returns `true` if the key existed. The eviction callback is invoked if present.
-
-- **`Clear()`**  
-  Removes all entries from the cache. The eviction callback is invoked for each item.
-
-- **`Size() int`**  
-  Returns the current number of items.
-
-- **`Capacity() int`**  
-  Returns the maximum capacity.
+Best practices
+•	Dùng snapshot cho list (String JSON), hash cho by_id và name2id.
+•	Mọi rebuild lớn dùng AtomicReplace* để switch key an toàn.
+•	Khi miss cache: refresh rồi thử lại, nếu vẫn miss → fallback DB/API.
+•	Kết hợp upsert theo sự kiện + full sweep định kỳ để chống lệch dữ liệu.
 
 # Test
 ```shell
