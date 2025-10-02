@@ -1,6 +1,6 @@
 # rediscache
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/chi07/rediscache)](https://goreportcard.com/report/github.com/chi07/rediscache)
+[![Go Report Card](https://goreportcard.com/badge/github.com/chi07/rediscache?v=1)](https://goreportcard.com/report/github.com/chi07/rediscache)
 [![codecov](https://codecov.io/gh/chi07/rediscache/branch/main/graph/badge.svg)](https://codecov.io/gh/chi07/rediscache)
 [![CI](https://github.com/chi07/rediscache/actions/workflows/ci.yml/badge.svg)](https://github.com/chi07/rediscache/actions/workflows/ci.yml)
 
